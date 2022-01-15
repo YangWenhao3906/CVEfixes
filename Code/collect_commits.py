@@ -77,26 +77,40 @@ def extract_project_links(df_master):
     """
     extracts all the reference urls from CVE records that match to the repo commit urls
     从CVE记录中提取与repo提交url匹配的所有reference url
+    @return df_fixes
     """
+    # [step1] 创建df_fixes保存在内存中
     df_fixes = pd.DataFrame(columns=fixes_columns)
+    
+    # 代码托管网站的commit的正则表达式
+    # ! 注意:提取的仅有含commit的url
     git_url = r'(((?P<repo>(https|http):\/\/(bitbucket|github|gitlab)\.(org|com)\/(?P<owner>[^\/]+)\/(?P<project>[^\/]*))\/(commit|commits)\/(?P<hash>\w+)#?)+)'
     cf.logger.info('-' * 70)
     cf.logger.info('Extracting all the reference urls from CVE...')
+    
+    # [step2] 将ref在GitHub等网站中的加入df_fixes
     for i in range(len(df_master)):
+        '''pandas DataFrame.iloc: 通过行号取数据; 返回: DataFrame'''
+        '''ast literal_eval: 类型转换, 此处将DataFrame转成list'''
         ref_list = ast.literal_eval(df_master['reference_json'].iloc[i])
         if len(ref_list) > 0:
+            # 若ref在GitHub等网站中,加入df_fixes
             for ref in ref_list:
                 url = dict(ref)['url']
+                '''re.search: 返回第一个成功的匹配'''
                 link = re.search(git_url, url)
                 if link:
                     row = {
+                        # 从url中提取hash和url
                         'cve_id': df_master['cve_id'][i],
                         'hash': link.group('hash'),
                         'repo_url': link.group('repo').replace(r'http:', r'https:')
                     }
                     df_fixes = df_fixes.append(pd.Series(row), ignore_index=True)
 
+    # 删掉重复的项并reset_index
     df_fixes = df_fixes.drop_duplicates().reset_index(drop=True)
+    # logger输出找到的ref在GitHub中的数目
     cf.logger.info('Number of collected references to vulnerability fixing commits:', len(df_fixes))
     return df_fixes
 
@@ -153,10 +167,11 @@ def changed_methods_both(file):
 
 
 # --------------------------------------------------------------------------------------------------------
-# extracting method_change data
+# extracting method_change data 提取method_change数据
 def get_methods(file, file_change_id):
     """
     returns the list of methods in the file.
+    把file中的method信息提取出来
     """
     file_methods = []
     try:
@@ -247,10 +262,11 @@ def get_methods(file, file_change_id):
 
 
 # ---------------------------------------------------------------------------------------------------------
-# extracting file_change data of each commit
+# extracting file_change data of each commit 提取每个提交的file_change数据
 def get_files(commit):
     """
     returns the list of files of the commit.
+    把commit中的关于文件的信息提取出来
     """
     commit_files = []
     commit_methods = []
@@ -298,7 +314,8 @@ def get_files(commit):
 
 
 def extract_commits(repo_url, hashes):
-    """This function extract git commit information of only the hashes list that were specified in the
+    """
+    This function extract git commit information of only the hashes list that were specified in the
     commit URL. All the commit_fields of the corresponding commit have been obtained.
     Every git commit hash can be associated with one or more modified/manipulated files.
     One vulnerability with same hash can be fixed in multiple files so we have created a dataset of modified files
@@ -306,6 +323,15 @@ def extract_commits(repo_url, hashes):
     :param repo_url: list of url links of all the projects.
     :param hashes: list of hashes of the commits to collect
     :return dataframes: at commit level and file level.
+    
+    这个函数只提取git提交信息的哈希列表中指定的
+    提交URL。已获取对应提交的所有commit_fields。
+    每个git提交哈希可以与一个或多个被修改/操作的文件相关联。
+    一个具有相同哈希的漏洞可以在多个文件中修复，因此我们创建了一个修改文件的数据集
+    作为项目的'df_file'。
+    :param repo_url:所有项目的url链接列表。
+    :param hashes:要收集的提交的哈希列表
+    :返回数据帧:在提交级和文件级。
     """
     repo_commits = []
     repo_files = []
@@ -319,14 +345,16 @@ def extract_commits(repo_url, hashes):
     cf.logger.debug(f'Extracting commits for {repo_url} with {cf.NUM_WORKERS} worker(s) looking for the following hashes:')
     log_commit_urls(repo_url, hashes)
 
-    # giving first priority to 'single' parameter for single hash because
+    # ? giving first priority to 'single' parameter for single hash because 
     # it has been tested that 'single' gets commit information in some cases where 'only_commits' does not,
+    # 给单哈希参数'single'优先级，因为已经通过测试知道:在某些情况下,'single'获得提交信息，而'only_commits'没有提交信息，
     # for example: https://github.com/hedgedoc/hedgedoc.git/35b0d39a12aa35f27fba8c1f50b1886706e7efef
     single_hash = None
     if len(hashes) == 1:
         single_hash = hashes[0]
         hashes = None
 
+    # 定位仓库的提交,并在commit/file/method层面分别进行存储
     for commit in Repository(path_to_repo=repo_url,
                              only_commits=hashes,
                              single=single_hash,
@@ -351,6 +379,7 @@ def extract_commits(repo_url, hashes):
                 'dmm_unit_interfacing': commit.dmm_unit_interfacing,
                 'dmm_unit_size': commit.dmm_unit_size,
             }
+            # 获取commit对应的file和method层面的改变
             commit_files, commit_methods = get_files(commit)
 
             repo_commits.append(commit_row)
